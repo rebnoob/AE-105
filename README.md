@@ -5,7 +5,7 @@ Follow the steps below to set up and run the environment on your own system.
 
 ---
 
-## 🚀 Setup Instructions
+## Setup Instructions
 
 ### 1. Install Conda
 If you don’t already have Conda, install either:
@@ -83,6 +83,4 @@ Commit the updated `environment.yml` to Git so others can stay in sync.
 **Main tools:** NumPy, Pandas, Matplotlib, SpiceyPy
 **Channels:** conda-forge, defaults
 
-````
----
 
