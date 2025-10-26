@@ -16,11 +16,7 @@ Check that Conda is available:
 ```bash
 conda --version
 
-Absolutely — here’s the complete **`README.md`** file in one big code block, ready for you to copy or save directly:
-
 ---
-
-````markdown
 
 ### 2. Create the Environment
 
