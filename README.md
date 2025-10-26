@@ -1,4 +1,4 @@
-# AE105 Conda Environment Setup
+# AE105 Environment Setup
 
 This project uses a reproducible Conda environment defined in `environment.yml`.  
 Follow the steps below to set up and run the environment on your own system.
