@@ -1,6 +1,5 @@
 # HW2_P3_1b.py
-# Time-varying (osculating) orbital elements from SPICE states.
-# Depends on: HW2_P3_1a.py (provides rv2coe / coe2rv)
+
 
 import numpy as np
 import pandas as pd
@@ -8,8 +7,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 
 import spiceypy as sp
-from HW2_P3_1a import rv2coe  # <-- your ELORB implementation from part (a)
-
+from HW2_P3_1a import rv2coe  
 # ---------------------------- CONFIG (edit paths) ----------------------------
 TLS = "/Users/rebnoob/Documents/ae105/generic_kernels/lsk/naif0012.tls"
 PCK = "/Users/rebnoob/Documents/ae105/generic_kernels/pck/pck00010.tpc"

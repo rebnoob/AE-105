@@ -127,13 +127,6 @@ def coe2rv(
 ):
     """
     Convert classical elements to inertial r,v following Algorithm 6 (RANDV).
-
-    Inputs (angles may be degrees or radians per `deg`):
-      - Use (p,e,i,RAAN,argp,nu) for the general case.
-      - Special cases (supply *only one* that applies):
-          * Circular equatorial:    set omega=Ω=0, use lambda_true as ν
-          * Circular inclined:      set omega=0,  use u as ν
-          * Elliptical equatorial:  set Ω=0,      use w_true_tilde as ω
     """
     # --- angle handling
     i_   = _deg2rad(i, deg) if i is not None else 0.0
