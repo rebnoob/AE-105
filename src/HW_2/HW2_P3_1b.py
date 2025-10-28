@@ -142,7 +142,7 @@ def moon_wrt_earth_states(ets):
     # r,v of Moon relative to Earth's center in FRAME, ABCORR
     return relative_states("MOON", "EARTH", ets)
 
-def run_mars_and_moon_earth(start_utc="2025-01-01T00:00:00",
+def run_mars_and_moon_earth(start_utc="2025-10-01T00:00:00",
                             end_utc="2025-12-31T00:00:00",
                             step_days=2,
                             use_mars_barycenter=True):
@@ -172,4 +172,4 @@ def run_mars_and_moon_earth(start_utc="2025-01-01T00:00:00",
 # ------------------------------- CLI entry -----------------------------------
 if __name__ == "__main__":
     # Example: whole year of 2025, every 3 days
-    run_mars_and_moon_earth(step_days=3)
+    run_mars_and_moon_earth(step_days=1)

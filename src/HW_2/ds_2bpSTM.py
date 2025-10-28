@@ -70,7 +70,7 @@ def ds_2bpSTM(x0_C: np.ndarray, dt: float, GM: float, x1_C: np.ndarray | None = 
     alpha = 2.0 / r0 - (v0**2) / GM_n
 
     # -- solve for universal anomaly xsi, and r1
-    toll = 1e-12
+    toll = 1e-15
     if compute_x1:
         r1, xsi = _aux_xsi(alpha, GM_n, si0, r0, v0, dt_n, toll)
     else:
@@ -123,10 +123,13 @@ def ds_2bpSTM(x0_C: np.ndarray, dt: float, GM: float, x1_C: np.ndarray | None = 
 
     # dv/dr0  (V~)
     dvdr0 = -np.outer(dv_C, r0_C) / (r0n**2) \
-            - np.outer(r1_C, dv_C) / (r1n**2) \
-            - Ft * np.outer(r1_C, r1_C) / (r1n**2) \
-            + Ft * (np.outer(r1_C, v1_C) - np.outer(v1_C, r1_C)) * (np.dot(r1_C, dv_C)) / (GM_n * r1n)
-    # The MATLAB has an extra commented term; we preserve the active ones:
+                - np.outer(r1_C, dv_C) / (r1n**2) \
+                - Ft * np.outer(r1_C, r1_C) / (r1n**2) \
+                + Ft * (np.outer(r1_C, v1_C) - np.outer(v1_C, r1_C)) \
+                    * (np.dot(r1_C, dv_C)) / (GM_n * r1n) \
+                - (GM_n * C) / (r1n**3 * r0n**3) * np.outer(r1_C, r0_C)
+
+    # finalize dv/dr0 (Battin adds +Ft*I at the end)
     dvdr0 = dvdr0 + Ft * np.eye(3)
 
     # dv/dv0  (V)
@@ -157,32 +160,39 @@ def ds_2bpSTM(x0_C: np.ndarray, dt: float, GM: float, x1_C: np.ndarray | None = 
 
 # -------------------------- helpers (faithful to MATLAB) --------------------------
 
+# in ds_2bpSTM.py
+
+# robust Stumpff for small arguments
 def _aux_univ(alpha: float, xsi: float):
-    """Return (U0,U1,U2,U3,U4,U5) universal functions (Battin)."""
-    if abs(alpha) < 1e-10:
-        # Parabola
+    # threshold for switching to series
+    eps = 1e-10
+    if abs(alpha) < eps:
+        # Parabolic limit via series (up to ξ^5 is fine in double)
         U0 = 1.0
         U1 = xsi
-        U2 = xsi**2 / 2.0
-        U3 = xsi**3 / 6.0
-        U4 = xsi**4 / 24.0
-        U5 = xsi**5 / 120.0
+        U2 = 0.5 * xsi**2
+        U3 = (1.0/6.0) * xsi**3
+        U4 = (1.0/24.0) * xsi**4
+        U5 = (1.0/120.0) * xsi**5
+        return U0, U1, U2, U3, U4, U5
+
+    if alpha > 0:
+        sa = np.sqrt(alpha); z = sa * xsi
+        c, s = np.cos(z), np.sin(z)
+        U0 = c
+        U1 = s / sa
     else:
-        if alpha >= 1e-10:
-            # Ellipse
-            sa = np.sqrt(alpha)
-            U0 = np.cos(sa * xsi)
-            U1 = np.sin(sa * xsi) / sa
-        else:
-            # Hyperbola
-            sa = np.sqrt(-alpha)
-            U0 = np.cosh(sa * xsi)
-            U1 = np.sinh(sa * xsi) / sa
-        U2 = (1.0 - U0) / alpha
-        U3 = (xsi - U1) / alpha
-        U4 = (xsi**2 / 2.0 - U2) / alpha
-        U5 = (xsi**3 / 6.0 - U3) / alpha
+        sa = np.sqrt(-alpha); z = sa * xsi
+        ch, sh = np.cosh(z), np.sinh(z)
+        U0 = ch
+        U1 = sh / sa
+
+    U2 = (1.0 - U0) / alpha
+    U3 = (xsi - U1) / alpha
+    U4 = (xsi**2 / 2.0 - U2) / alpha
+    U5 = (xsi**3 / 6.0 - U3) / alpha
     return U0, U1, U2, U3, U4, U5
+
 
 
 def _aux_xsi(alpha, GM, si0, r0, v0, dt, toll):

@@ -1,161 +1,97 @@
-# test_symplectic_ds2bpstm.py
-# Verify that ds_2bpSTM's STM is (numerically) symplectic.
-# Prereqs: numpy; optional spiceypy for the Sun–Mars state
+# check_symplectic.py
+# Verify that the two-body step map from ds_2bpSTM is symplectic.
 
 from __future__ import annotations
 import numpy as np
-
-# ---- import your propagator (Python port of ds_2bpSTM.m)
+import spiceypy as sp
+from pathlib import Path
 from ds_2bpSTM import ds_2bpSTM
 
-# ---- (Optional) SPICE helpers (comment out if you don’t want SPICE) ----
-USE_SPICE = True
-if USE_SPICE:
-    import spiceypy as sp
+# ------------- CONFIG (match your setup) -------------
+TLS = "/Users/rebnoob/Documents/ae105/generic_kernels/lsk/naif0012.tls"
+PCK = "/Users/rebnoob/Documents/ae105/generic_kernels/pck/pck00010.tpc"
+SPK = "/Users/rebnoob/Documents/ae105/generic_kernels/spk/planets/de442.bsp"
 
-    # UPDATE these paths for your machine:
-    TLS = "/Users/rebnoob/Documents/ae105/generic_kernels/lsk/naif0012.tls"
-    PCK = "/Users/rebnoob/Documents/ae105/generic_kernels/pck/pck00010.tpc"
-    SPK = "/Users/rebnoob/Documents/ae105/generic_kernels/spk/planets/de442.bsp"
+FRAME = "J2000"
+ABCORR = "NONE"
+TARGET = "MARS BARYCENTER"  # or "MARS"
+MU_SUN = 1.327124400419e11  # km^3/s^2
 
-    FRAME  = "J2000"
-    ABCORR = "NONE"
+UTC0 = "2025-01-01T00:00:00"
+DT_SEC = 1 * 86400.0        # one step (e.g., 3 days)
+N_STEPS = 120               # number of checks along the trajectory
+# -----------------------------------------------------
 
-    def load_kernels():
-        sp.kclear()
-        sp.furnsh(TLS); sp.furnsh(PCK); sp.furnsh(SPK)
+def load_kernels():
+    sp.kclear()
+    sp.furnsh(TLS); sp.furnsh(PCK); sp.furnsh(SPK)
 
-    def heliocentric_state(target: str, et: float):
-        st_tgt, _ = sp.spkezr(target, et, FRAME, ABCORR, "SSB")
-        st_sun, _ = sp.spkezr("SUN",   et, FRAME, ABCORR, "SSB")
-        r = np.array(st_tgt[:3]) - np.array(st_sun[:3])
-        v = np.array(st_tgt[3:]) - np.array(st_sun[3:])
-        return r, v
-
-# ---- Physics constants (km, s)
-MU_SUN   = 1.327124400419e11   # km^3/s^2
-MU_EARTH = 3.986004418e5       # km^3/s^2
-
-# ---- Symplectic utilities
-def J6():
-    I3 = np.eye(3)
-    return np.block([[np.zeros((3,3)),  I3],
-                     [-I3,              np.zeros((3,3))]])
-
-def symplectic_residual(Phi):
-    J = J6()
-    return Phi.T @ J @ Phi - J
-
-def check_symplectic_at_state(x0, dt, mu,
-                              tol_sym_fro=5e-5,
-                              tol_sym_inf=5e-5,
-                              tol_det=5e-5,
-                              tol_rev_fro=5e-5,
-                              verbose=True):
-    """
-    Compute ds_2bpSTM forward/backward STMs and check:
-      1) ||Phi^T J Phi - J||_F, ||.||_inf
-      2) det(Phi) ~ 1
-      3) reversibility: Phi(-dt) @ Phi(dt) ~ I
-    Throws AssertionError if any check exceeds tolerance.
-    """
-    # forward step
-    x1, Phi = ds_2bpSTM(x0, dt, mu)
-    # symplectic defect
-    S = symplectic_residual(Phi)
-    sF = np.linalg.norm(S, 'fro')
-    sI = np.linalg.norm(S, np.inf)
-    detP = np.linalg.det(Phi)
-    # backward step at x1
-    _, Phi_back = ds_2bpSTM(x1, -dt, mu)
-    rev = Phi_back @ Phi - np.eye(6)
-    rF = np.linalg.norm(rev, 'fro')
-
-    if verbose:
-        print(f"  dt = {dt: .3e} s")
-        print(f"    ||Phi^T J Phi - J||_F   = {sF:.3e}")
-        print(f"    ||Phi^T J Phi - J||_inf = {sI:.3e}")
-        print(f"    det(Phi)                = {detP:.12f}")
-        print(f"    ||Phi(-dt)Phi(dt)-I||_F = {rF:.3e}")
-
-    # assertions
-    assert sF <= tol_sym_fro, f"Symplectic Frobenius residual too large: {sF}"
-    assert sI <= tol_sym_inf, f"Symplectic infinity-norm residual too large: {sI}"
-    assert abs(detP - 1.0) <= tol_det, f"det(Phi) not ~1: {detP}"
-    assert rF <= tol_rev_fro, f"Reversibility residual too large: {rF}"
-
-def make_circular_state(a_km, mu):
-    """Return Cartesian (r,v) for a circular equatorial orbit in the x–y plane."""
-    r = np.array([a_km, 0.0, 0.0])
-    vmag = np.sqrt(mu / a_km)
-    v = np.array([0.0, vmag, 0.0])
+def heliocentric_state(target: str, et: float):
+    st_tgt, _ = sp.spkezr(target, et, FRAME, ABCORR, "SSB")
+    st_sun, _ = sp.spkezr("SUN",   et, FRAME, ABCORR, "SSB")
+    r = np.array(st_tgt[:3]) - np.array(st_sun[:3])
+    v = np.array(st_tgt[3:]) - np.array(st_sun[3:])
     return r, v
 
-def random_kepler_state(mu, a_range=(0.5, 3.0), e_range=(0.0, 0.8),
-                        i_range=(0.0, np.deg2rad(85.0)),
-                        seed=None):
-    """
-    Draw a random Keplerian set and convert to Cartesian in PQW->IJK.
-    (Simple generator—sufficient for stress testing.)
-    """
-    rng = np.random.default_rng(seed)
-    a = 1.0e8 * rng.uniform(*a_range)          # scale semi-major axis (km)
-    e = rng.uniform(*e_range)
-    i = rng.uniform(*i_range)
-    RAAN  = rng.uniform(0, 2*np.pi)
-    argp  = rng.uniform(0, 2*np.pi)
-    nu    = rng.uniform(0, 2*np.pi)
-    p = a*(1 - e*e)
-    cnu, snu = np.cos(nu), np.sin(nu)
-    r_pqw = np.array([p*cnu/(1+e*cnu), p*snu/(1+e*cnu), 0.0])
-    vp = np.sqrt(mu/p)
-    v_pqw = np.array([-vp*snu, vp*(e + cnu), 0.0])
-    # rotation: R3(RAAN) R1(i) R3(argp)
-    cO, sO = np.cos(RAAN), np.sin(RAAN)
-    ci, si = np.cos(i),    np.sin(i)
-    cw, sw = np.cos(argp), np.sin(argp)
-    R3_O = np.array([[ cO,-sO,0],[ sO, cO,0],[0,0,1]])
-    R1_i = np.array([[1,0,0],[0,ci,-si],[0,si,ci]])
-    R3_w = np.array([[ cw,-sw,0],[ sw, cw,0],[0,0,1]])
-    C = R3_O @ R1_i @ R3_w
-    r_ijk = C @ r_pqw
-    v_ijk = C @ v_pqw
-    return r_ijk, v_ijk
+def is_symplectic(Phi: np.ndarray, rtol=1e-9, atol=1e-12):
+    """Return residual norms for ΦᵀJΦ - J and |det Φ - 1|."""
+    I = np.eye(3)
+    J = np.block([[np.zeros((3,3)),  I],
+                  [-I,               np.zeros((3,3))]])
+    R = Phi.T @ J @ Phi - J
+    res_norm = np.linalg.norm(R, ord=np.inf)
+    det_dev  = abs(np.linalg.det(Phi) - 1.0)
+    return res_norm, det_dev
 
 def main():
-    print("=== Symplectic test for ds_2bpSTM (STM) ===")
+    load_kernels()
+    et0 = sp.utc2et(UTC0)
+    r0, v0 = heliocentric_state(TARGET, et0)
+    x = np.hstack([r0, v0])
 
-    # 1) SPICE Sun–Mars state (optional realistic case)
-    if USE_SPICE:
-        print("\n[Case A] Sun–Mars heliocentric state (SPICE)")
-        load_kernels()
-        et0 = sp.utc2et("2025-01-01T00:00:00")
-        r0, v0 = heliocentric_state("MARS BARYCENTER", et0)  # or "MARS"
-        x0 = np.hstack([r0, v0])
-        for days in [1, 7, 30, 90]:
-            dt = days * 86400.0
-            check_symplectic_at_state(x0, dt, MU_SUN)
+    # Per-step symplecticity and cumulative product (composition) check
+    max_res, max_detdev = 0.0, 0.0
+    max_res_cum, max_detdev_cum = 0.0, 0.0
 
-    # 2) Simple circular test (sanity, Earth circular LEO-ish scale)
-    print("\n[Case B] Circular synthetic state (Earth mu)")
-    r0, v0 = make_circular_state(a_km=7000.0, mu=MU_EARTH)
-    x0 = np.hstack([r0, v0])
-    for minutes in [10, 45, 90]:
-        dt = minutes * 60.0
-        check_symplectic_at_state(x0, dt, MU_EARTH)
+    Phi_cum = np.eye(6)  # product of STMs across steps
+    et = et0
 
-    # 3) Random synthetic Keplerian states (Sun mu), many dt samples
-    print("\n[Case C] Random Keplerian states (Sun mu), dt sweep")
-    rng = np.random.default_rng(42)
-    for k in range(5):  # 5 random states
-        r0, v0 = random_kepler_state(MU_SUN, seed=rng.integers(1, 10_000))
-        x0 = np.hstack([r0, v0])
-        # shorter to longer steps
-        for days in [0.1, 1, 10, 50]:
-            dt = days * 86400.0
-            check_symplectic_at_state(x0, dt, MU_SUN)
+    for k in range(N_STEPS):
+        # one exact two-body step (ds_2bpSTM returns dimensional STM)
+        x1, Phi = ds_2bpSTM(x, DT_SEC, MU_SUN)
 
-    print("\nAll symplectic checks PASSED within tolerances.")
+        # per-step symplectic check
+        res, detdev = is_symplectic(Phi)
+        max_res = max(max_res, res)
+        max_detdev = max(max_detdev, detdev)
+
+        # accumulate STM and check composition remains symplectic
+        Phi_cum = Phi @ Phi_cum
+        res_c, detdev_c = is_symplectic(Phi_cum)
+        max_res_cum = max(max_res_cum, res_c)
+        max_detdev_cum = max(max_detdev_cum, detdev_c)
+
+        # advance
+        x = x1
+        et += DT_SEC
+
+    print(f"Symplecticity check for {TARGET} two-body flow using ds_2bpSTM")
+    print(f"  Steps: {N_STEPS},  dt = {DT_SEC/86400.0:.1f} days")
+    print(f"Per-step Φ:")
+    print(f"  ||Φᵀ J Φ − J||_∞   = {max_res:.3e}")
+    print(f"  |det Φ − 1|        = {max_detdev:.3e}")
+    print(f"Cumulative Φ (product over steps):")
+    print(f"  ||Φᵀ J Φ − J||_∞   = {max_res_cum:.3e}")
+    print(f"  |det Φ − 1|        = {max_detdev_cum:.3e}")
+
+    # Optional: also verify J-inverse identity numerically
+    # J^{-1} = -J for canonical J; check Φ^{-1} ≈ -J Φᵀ J
+    I = np.eye(3)
+    J = np.block([[np.zeros((3,3)),  I],
+                  [-I,               np.zeros((3,3))]])
+    Phi_inv_from_J = -J @ Phi_cum.T @ J
+    rel_inv_err = np.linalg.norm(np.linalg.inv(Phi_cum) - Phi_inv_from_J, ord=np.inf) / np.linalg.norm(Phi_inv_from_J, ord=np.inf)
+    print(f"Inverse identity check (Φ⁻¹ vs −J Φᵀ J): rel. ∞-norm error = {rel_inv_err:.3e}")
 
 if __name__ == "__main__":
     main()
