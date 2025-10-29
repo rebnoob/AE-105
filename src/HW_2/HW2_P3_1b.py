@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+import matplotlib.ticker as ticker
 
 import spiceypy as sp
 from HW2_P3_1a import rv2coe  
@@ -71,43 +72,49 @@ def _unwrap_deg(a_deg):
     """Unwrap a 1D array of angles in degrees to make continuous curves."""
     return np.rad2deg(np.unwrap(np.deg2rad(a_deg)))
 
-def osculating_elements_timeseries(r_arr, v_arr, mu, deg=True):
+def osculating_elements_timeseries(r_arr, v_arr, mu, deg=True, unwrap=("i","RAAN","argp")):
     """
     Vectorized wrapper around rv2coe for time-series r,v.
 
-    Parameters
-    ----------
-    r_arr : (N,3) km
-    v_arr : (N,3) km/s
-    mu    : km^3/s^2
-    deg   : return angles in degrees
-
-    Returns
-    -------
-    DataFrame with columns: a, p, e, i, RAAN, argp, nu
-    (angles unwrapped if deg=True)
+    Returns DataFrame columns:
+      a, p, e, i, RAAN, argp, nu,  (always)
+      u, lambda_true, w_true_tilde (when applicable; else NaN)
     """
     rows = []
     for r, v in zip(r_arr, v_arr):
-        coe = rv2coe(r, v, mu=mu, deg=True)  # keep degrees for unwrapping logic
-        rows.append(coe)
+        rows.append(rv2coe(r, v, mu=mu, deg=True))  # compute in degrees
 
-    df = pd.DataFrame(rows, columns=["a","p","e","i","RAAN","argp","nu"])
-    # rv2coe in part (a) used keys: 'a','p','e','i','RAAN','argp','nu'
-    # Ensure correct ordering / missing keys
-    for k in ["a","p","e","i","RAAN","argp","nu"]:
-        if k not in df.columns:
-            df[k] = np.nan
+    # Normalize to a common schema
+    keys = ["a","p","e","i","RAAN","argp","nu","u","lambda_true","w_true_tilde"]
+    norm_rows = []
+    for d in rows:
+        norm_rows.append({k: d.get(k, np.nan) for k in keys})
+    df = pd.DataFrame(norm_rows, columns=keys)
+
+    # Unwrap selected angular columns only
+    def _unwrap_deg(colname):
+        arr = df[colname].to_numpy(dtype=float)
+        mask = np.isfinite(arr)
+        arr_unw = np.copy(arr)
+        if mask.any():
+            arr_unw[mask] = np.rad2deg(np.unwrap(np.deg2rad(arr[mask])))
+        df[colname] = arr_unw
 
     if deg:
-        # unwrap angles for nice plots
-        for ang in ["i","RAAN","argp","nu"]:
-            df[ang] = _unwrap_deg(df[ang].to_numpy(dtype=float))
+        for col in unwrap:
+            if col in df.columns:
+                _unwrap_deg(col)
+        # Leave ν wrapped in [0,360) so it shows true anomaly properly
+        # For diagnostic continuous phase, you could opt-in: unwrap=(*, "nu")
     else:
-        # convert to radians and unwrap if needed
-        for ang in ["i","RAAN","argp","nu"]:
-            rad = np.deg2rad(df[ang].to_numpy(dtype=float))
-            df[ang] = np.unwrap(rad)
+        # radians path (rare here)
+        for col in unwrap:
+            if col in df.columns:
+                arr = df[col].to_numpy(dtype=float)
+                mask = np.isfinite(arr)
+                arr[mask] = np.unwrap(arr[mask])
+                df[col] = arr
+
     return df
 
 def plot_elements(df, utc_list, title_prefix):
@@ -132,6 +139,7 @@ def plot_elements(df, utc_list, title_prefix):
 
     fig.suptitle(f"{title_prefix} — Osculating Elements (Conic Fits)")
     axs[-1].set_xlabel("UTC")
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(80))
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.show()
 
@@ -142,9 +150,9 @@ def moon_wrt_earth_states(ets):
     # r,v of Moon relative to Earth's center in FRAME, ABCORR
     return relative_states("MOON", "EARTH", ets)
 
-def run_mars_and_moon_earth(start_utc="2025-10-01T00:00:00",
+def run_mars_and_moon_earth(start_utc="2025-01-01T00:00:00",
                             end_utc="2025-12-31T00:00:00",
-                            step_days=2,
+                            step_days=1,
                             use_mars_barycenter=True):
     """
     Build osculating elements for:

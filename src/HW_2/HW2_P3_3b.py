@@ -1,15 +1,16 @@
-# porkchop_earth_mars_2035.py (revised)
-# Earth→Mars porkchop with selectable ephemerides (SPICE or Kepler J2000 mean elements),
-# Izzo 2015 Lambert (lamberthub), and plots for C3 or Total ΔV (v∞,dep + v∞,arr).
+# porkchop_earth_mars_2035_singleplot.py (revised)
+# Earth→Mars porkchop (single plot) with selectable ephemerides (SPICE or Kepler J2000 mean elements),
+# Izzo 2015 Lambert (lamberthub), and line-contour base for Total ΔV (|v∞,dep| + |v∞,arr|)
+# overlaid with highlighted contours for C3 (orange) and v∞,arr (magenta).
 #
-# - Two branches: short/long (single-rev, prograde)
+# - Single figure only (short-path, single-rev, prograde)
 # - Exports CSV with C3, v∞ (dep/arr), Total ΔV, TOF
 # - Optional heliocentric XY preview (trajectory context)
 #
 # NOTE on "Total ΔV":
-#   This script uses |v∞,dep| + |v∞,arr| as a mission-planning proxy, matching typical porkchop usage
-#   when you don't model parking orbits/SoI capture. If you want LEO injection / capture ΔV, add those
-#   models where v∞ maps to hyperbolic excess over specified circular orbits.
+#   We use |v∞,dep| + |v∞,arr| as a mission-planning proxy, matching typical porkchop usage
+#   when you don't model parking orbits/SoI capture. If you want LEO injection / capture ΔV,
+#   add those models where v∞ maps to hyperbolic excess over specified circular orbits.
 
 from __future__ import annotations
 import numpy as np
@@ -52,25 +53,18 @@ DEP_STEP_DAYS = 3
 ARR_STEP_DAYS = 3
 
 # Filters on TOF (to avoid too short/long arcs)
-TOF_MIN_DAYS = 90
-TOF_MAX_DAYS = 500
+TOF_MIN_DAYS = 40
+TOF_MAX_DAYS = 520
 
-# Plotting choices
-FILLED_CONTOUR_METRIC = "DV"  # "DV" for Total ΔV proxy (|v∞dep|+|v∞arr|) or "C3"
-SHOW_ARRIVAL_VINF_OVERLAY = True
-SHOW_HELIOCENTRIC_XY_PREVIEW = True
-
-# Output
+# Output (single plot only)
 OUTDIR = Path(".")
-PNG_NAME_SHORT = "porkchop_earth_to_mars_2035_short.png"
-PNG_NAME_LONG  = "porkchop_earth_to_mars_2035_long.png"
+PNG_NAME_SINGLE = "porkchop_earth_to_mars_2035_SINGLE.png"
 CSV_NAME = "porkchop_earth_to_mars_2035.csv"
 # ==================================================
 
 
 # ===================== KEPLERIAN ELEMENTS (J2000) =====================
 # Mean (osculating-mean) elements at J2000, suitable for simple, pedagogical propagation.
-# Replace with your preferred dataset if desired.
 # Elements: a[km], e[-], i[rad], Omega[rad], w[rad], M0[rad] at epoch t0 = J2000 TDB
 # These are representative commonly used values; for precise work use SPICE.
 J2000_ISO = "2000-01-01T12:00:00"  # J2000 epoch
@@ -249,6 +243,7 @@ def preview_xy(dep_utcs):
     plt.grid(True, alpha=0.3); plt.legend()
     plt.tight_layout(); plt.show()
 
+
 def build_porkchop(mu_sun: float):
     # Prepare date grids
     dep_utcs = list(daterange_utc(DEP_START, DEP_END, DEP_STEP_DAYS))
@@ -262,13 +257,9 @@ def build_porkchop(mu_sun: float):
 
     # Short/Long metrics
     C3_short   = np.full(shape, np.nan)
-    C3_long    = np.full(shape, np.nan)
     vinfD_short = np.full(shape, np.nan)
     vinfA_short = np.full(shape, np.nan)
-    vinfD_long  = np.full(shape, np.nan)
-    vinfA_long  = np.full(shape, np.nan)
     DVtot_short = np.full(shape, np.nan)  # |v∞dep| + |v∞arr|
-    DVtot_long  = np.full(shape, np.nan)
 
     # Loop over grid
     for j, et_arr in enumerate(arr_ets):
@@ -283,91 +274,111 @@ def build_porkchop(mu_sun: float):
             r1_km, vE_kms = planetary_rv(et_dep, "EARTH")
             r2_km, vM_kms = planetary_rv(et_arr, "MARS")
             sols = solve_lambert_both(mu_sun, r1_km, r2_km, dt_sec, prograde=True)
-            if not sols:
+            if "short" not in sols:
                 continue
 
-            TOF_days[j, i] = tof_days
-
-            # Short path
-            if "short" in sols:
-                v1s, v2s = sols["short"]
-                dv_dep = v1s - vE_kms
-                dv_arr = v2s - vM_kms
-                vinfD_short[j, i] = float(np.linalg.norm(dv_dep))
-                vinfA_short[j, i] = float(np.linalg.norm(dv_arr))
-                C3_short[j, i]    = float(np.dot(dv_dep, dv_dep))
-                DVtot_short[j, i] = vinfD_short[j, i] + vinfA_short[j, i]
-
-            # Long path
-            if "long" in sols:
-                v1l, v2l = sols["long"]
-                dv_dep = v1l - vE_kms
-                dv_arr = v2l - vM_kms
-                vinfD_long[j, i]  = float(np.linalg.norm(dv_dep))
-                vinfA_long[j, i]  = float(np.linalg.norm(dv_arr))
-                C3_long[j, i]     = float(np.dot(dv_dep, dv_dep))
-                DVtot_long[j, i]  = vinfD_long[j, i] + vinfA_long[j, i]
+            v1s, v2s = sols["short"]
+            dv_dep = v1s - vE_kms
+            dv_arr = v2s - vM_kms
+            vinfD_short[j, i] = float(np.linalg.norm(dv_dep))
+            vinfA_short[j, i] = float(np.linalg.norm(dv_arr))
+            C3_short[j, i]    = float(np.dot(dv_dep, dv_dep))
+            DVtot_short[j, i] = vinfD_short[j, i] + vinfA_short[j, i]
+            TOF_days[j, i]    = tof_days
 
     grid = {
         "dep_utcs": dep_utcs,
         "arr_utcs": arr_utcs,
         "TOF_days": TOF_days,
         "C3_short": C3_short,
-        "C3_long": C3_long,
         "vinfD_short": vinfD_short,
         "vinfA_short": vinfA_short,
-        "vinfD_long":  vinfD_long,
-        "vinfA_long":  vinfA_long,
         "DVtot_short": DVtot_short,
-        "DVtot_long":  DVtot_long,
     }
     return grid
 
 
-def plot_porkchop_branch(dep_utcs, arr_utcs, Z_filled, TOF_days, vinfA=None,
-                         title_suffix="", outfile="porkchop.png", metric_label=""):
+# --- SINGLE-PLOT porkchop: DV line contours + highlighted C3 (orange) + v∞,arr (magenta) ---
+def plot_porkchop_single(dep_utcs, arr_utcs, DV_short, C3_short, vinfA_short, TOF_days,
+                         outfile=PNG_NAME_SINGLE,
+                         cmap="turbo",
+                         dv_step=0.5,
+                         tof_step_days=30):
     # Convert date axes
     dep_dates = pd.to_datetime(dep_utcs)
     arr_dates = pd.to_datetime(arr_utcs)
     X, Y = np.meshgrid(dep_dates, arr_dates)
 
-    finite_Z = Z_filled[np.isfinite(Z_filled)]
-    if finite_Z.size == 0:
-        print(f"[{title_suffix}] No valid Lambert solutions, skipping plot.")
+    # Guard: any data?
+    finite = np.isfinite(DV_short)
+    if not finite.any():
+        print("[single-plot] No valid Lambert solutions, skipping plot.")
         return
-    z5, z95 = np.percentile(finite_Z, [5, 95])
-    levels = np.linspace(z5, z95, 12) if z95 > z5 else np.linspace(z5, z5 + 1.0, 12)
 
-    fig, ax = plt.subplots(figsize=(10.5, 7.0))
-    pc = ax.contourf(X, Y, Z_filled, levels=levels, cmap="viridis", extend="both")
-    cbar = fig.colorbar(pc, ax=ax, pad=0.02)
-    cbar.set_label(metric_label)
+    # DV line-contour levels (km/s)
+    Z = DV_short.copy()
+    zmin = np.nanpercentile(Z, 5)
+    zmax = np.nanpercentile(Z, 95)
+    if np.isclose(zmin, zmax):
+        zmin, zmax = np.nanmin(Z), np.nanmax(Z)
+    levels = np.arange(np.floor(zmin/dv_step)*dv_step, np.ceil(zmax/dv_step)*dv_step + 0.5*dv_step, dv_step)
 
-    # TOF contours
-    tof_levels = np.arange(TOF_MIN_DAYS, TOF_MAX_DAYS+1, 30)
-    CS = ax.contour(X, Y, TOF_days, levels=tof_levels, colors="w", linewidths=1.0, alpha=0.9)
-    ax.clabel(CS, fmt=lambda d: f"{int(d)} d", inline=True, fontsize=8)
+    fig, ax = plt.subplots(figsize=(11.0, 7.4))
 
-    # Optional arrival v_inf overlay (thin lines)
-    if vinfA is not None and np.isfinite(vinfA).any():
-        try:
-            finite_v = vinfA[np.isfinite(vinfA)]
+    # Base: DV line contours (colored by colormap)
+    cs_dv = ax.contour(X, Y, Z, levels=levels, cmap=cmap, linewidths=1.1)
+    ax.clabel(cs_dv, fmt=lambda v: f"{v:.1f}", inline=True, fontsize=7)
+
+    # Colorbar for DV line colors
+    norm = mpl.colors.Normalize(vmin=levels.min(), vmax=levels.max())
+    sm = mpl.cm.ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, pad=0.02)
+    cbar.set_label(r"Total $\Delta V$ proxy $|v_{\infty,dep}| + |v_{\infty,arr}|$ (km/s)")
+
+    # TOF contours (thin gray)
+    if np.isfinite(TOF_days).any():
+        tof_levels = np.arange(TOF_MIN_DAYS, TOF_MAX_DAYS + 1, tof_step_days)
+        cs_tof = ax.contour(X, Y, TOF_days, levels=tof_levels, colors="#666666", linewidths=0.8, linestyles="solid")
+        ax.clabel(cs_tof, fmt=lambda d: f"{int(d)} d", inline=True, fontsize=8)
+
+    # Overlay: C3 (orange dashed)
+    if np.isfinite(C3_short).any():
+        # choose a reasonable spread of C3 levels based on percentiles
+        finite_c3 = C3_short[np.isfinite(C3_short)]
+        if finite_c3.size > 0:
+            c3_5, c3_95 = np.percentile(finite_c3, [5, 95])
+            # ensure at least a couple of lines
+            c3_levels = np.linspace(c3_5, c3_95, 5) if c3_95 > c3_5 else [c3_5]
+            cs_c3 = ax.contour(X, Y, C3_short, levels=c3_levels, colors="#ff8800", linewidths=1.0, linestyles="--")
+            ax.clabel(cs_c3, fmt=lambda v: f"C3={v:.1f}", fontsize=7)
+
+    # Overlay: v∞ arrival (magenta solid)
+    if np.isfinite(vinfA_short).any():
+        finite_v = vinfA_short[np.isfinite(vinfA_short)]
+        if finite_v.size > 0:
             a5, a95 = np.percentile(finite_v, [5, 95])
             v_levels = np.linspace(a5, a95, 6) if a95 > a5 else [a5]
-            CSv = ax.contour(X, Y, vinfA, levels=v_levels, colors="magenta", linewidths=0.8)
-            ax.clabel(CSv, fmt=lambda x: f"{x:.1f} km/s", fontsize=7)
-        except Exception:
-            pass
+            cs_v = ax.contour(X, Y, vinfA_short, levels=v_levels, colors="magenta", linewidths=0.9)
+            ax.clabel(cs_v, fmt=lambda v: f"v∞={v:.1f}", fontsize=7)
 
-    ax.set_title(f"Earth → Mars porkchop ({metric_label}), {title_suffix} — {EPHEMERIS_MODE}")
+    # Legend proxies for overlays
+    from matplotlib.lines import Line2D
+    legend_elems = [
+        Line2D([0], [0], color="#ff8800", lw=1.2, ls="--", label=r"$C_3$ contours (km$^2$/s$^2$)"),
+        Line2D([0], [0], color="magenta", lw=1.2, ls="-",  label=r"$v_{\infty,arr}$ contours (km/s)"),
+    ]
+    ax.legend(handles=legend_elems, loc="upper right", framealpha=0.9)
+
+    ax.set_title(f"Earth → Mars porkchop")
     ax.set_xlabel("Departure date (UTC)")
     ax.set_ylabel("Arrival date (UTC)")
-    ax.grid(True, alpha=0.3)
+    ax.grid(True, alpha=0.35)
 
     OUTDIR.mkdir(parents=True, exist_ok=True)
     out_path = OUTDIR / outfile
     plt.tight_layout()
-    plt.savefig(out_path, dpi=180)
+    plt.savefig(out_path, dpi=200)
     print(f"Saved porkchop figure: {out_path}")
     plt.show()
 
@@ -383,91 +394,14 @@ def save_grid_csv(grid):
                 "arr_utc": arr_utc,
                 "TOF_days": grid["TOF_days"][j, i],
                 "C3_short": grid["C3_short"][j, i],
-                "C3_long":  grid["C3_long"][j, i],
                 "vinfD_short_kms": grid["vinfD_short"][j, i],
                 "vinfA_short_kms": grid["vinfA_short"][j, i],
-                "vinfD_long_kms":  grid["vinfD_long"][j, i],
-                "vinfA_long_kms":  grid["vinfA_long"][j, i],
                 "DVtot_short_kms": grid["DVtot_short"][j, i],
-                "DVtot_long_kms":  grid["DVtot_long"][j, i],
             })
     df = pd.DataFrame(rows)
     out_csv = OUTDIR / CSV_NAME
     df.to_csv(out_csv, index=False)
     print(f"Saved grid CSV: {out_csv}")
-# --- NEW: line-contour (no fill) porkchop plot ------------------------
-
-def plot_porkchop_contours(dep_utcs, arr_utcs, Z, TOF_days,
-                           title_suffix="", outfile="porkchop.png",
-                           metric_label=r"Total $\Delta V$ (km/s)",
-                           mark_min=True,
-                           cmap="turbo",
-                           line_w=1.0,
-                           tof_step_days=30):
-    """
-    Draws colored line contours (no fill) + gray TOF contours.
-    Matches the classic NASA porkchop look.
-    """
-    # axes grids
-    dep_dates = pd.to_datetime(dep_utcs)
-    arr_dates = pd.to_datetime(arr_utcs)
-    X, Y = np.meshgrid(dep_dates, arr_dates)
-
-    # guard: any data?
-    finite = np.isfinite(Z)
-    if not finite.any():
-        print(f"[{title_suffix}] No valid Lambert solutions, skipping plot.")
-        return
-
-    Zf = Z.copy()
-    # choose clean contour levels
-    zmin = np.nanpercentile(Zf, 5)
-    zmax = np.nanpercentile(Zf, 95)
-    if np.isclose(zmin, zmax):
-        zmin, zmax = np.nanmin(Zf), np.nanmax(Zf)
-    # round to nice values (ΔV uses km/s; C3 would be km^2/s^2)
-    step = 0.5 if "ΔV" in metric_label or "Delta" in metric_label or "DV" in metric_label.upper() else (zmax - zmin)/12
-    levels = np.arange(np.floor(zmin/step)*step, np.ceil(zmax/step)*step + 0.5*step, step)
-
-    fig, ax = plt.subplots(figsize=(10.8, 7.2))
-
-    # draw colored line contours
-    cs = ax.contour(X, Y, Z, levels=levels, cmap=cmap, linewidths=line_w)
-    ax.clabel(cs, fmt=lambda v: f"{v:.1f}", inline=True, fontsize=7)  # label a subset automatically
-
-    # colorbar that reflects the line colors
-    norm = mpl.colors.Normalize(vmin=levels.min(), vmax=levels.max())
-    sm = mpl.cm.ScalarMappable(norm=norm, cmap=cmap)
-    sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, pad=0.02)
-    cbar.set_label(metric_label)
-
-    # TOF contours (thin gray)
-    if np.isfinite(TOF_days).any():
-        tof_levels = np.arange(TOF_MIN_DAYS, TOF_MAX_DAYS + 1, tof_step_days)
-        cs_tof = ax.contour(X, Y, TOF_days, levels=tof_levels,
-                            colors="#555555", linewidths=0.8, linestyles="solid")
-        ax.clabel(cs_tof, fmt=lambda d: f"{int(d)} d", inline=True, fontsize=8)
-
-    # mark global minimum, if desired
-    if mark_min:
-        j,i = np.unravel_index(np.nanargmin(Zf), Zf.shape)
-        ax.plot(dep_dates[i], arr_dates[j], marker="o",
-                markerfacecolor="none", markeredgecolor="magenta", markersize=8, lw=0.0)
-        ax.plot(dep_dates[i], arr_dates[j], marker="o",
-                markerfacecolor="magenta", markeredgecolor="magenta", markersize=3, lw=0.0)
-
-    ax.set_title(f"Earth → Mars porkchop (line contours), {title_suffix} — {EPHEMERIS_MODE}")
-    ax.set_xlabel("Launch Date (UTC)")
-    ax.set_ylabel("Arrival Date (UTC)")
-    ax.grid(True, alpha=0.35)
-
-    OUTDIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUTDIR / outfile
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=200)
-    print(f"Saved porkchop figure: {out_path}")
-    plt.show()
 
 
 # ---------------- Main ----------------
@@ -476,64 +410,23 @@ def main():
         load_kernels()
 
     # Optional: quick preview XY in AU over the dep window
-    if SHOW_HELIOCENTRIC_XY_PREVIEW:
-        dep_utcs_preview = list(daterange_utc(DEP_START, DEP_END, DEP_STEP_DAYS))
-        preview_xy(dep_utcs_preview)
+    # dep_utcs_preview = list(daterange_utc(DEP_START, DEP_END, DEP_STEP_DAYS))
+    # preview_xy(dep_utcs_preview)
 
-    # Build porkchop grid
+    # Build porkchop grid (short-path only)
     grid = build_porkchop(MU_SUN)
-    # After grid = build_porkchop(MU_SUN)
-    plot_porkchop_contours(
+
+    # Single plot: DV line contours + highlighted C3 (orange) + v∞,arr (magenta)
+    plot_porkchop_single(
         grid["dep_utcs"], grid["arr_utcs"],
-        grid["DVtot_short"], grid["TOF_days"],
-        title_suffix="short path (single-rev, prograde)",
-        outfile=PNG_NAME_SHORT.replace(".png","_lines.png"),
-        metric_label=r"Total $\Delta V$ (km/s)"
-    )
-    plot_porkchop_contours(
-        grid["dep_utcs"], grid["arr_utcs"],
-        grid["DVtot_long"], grid["TOF_days"],
-        title_suffix="long path (single-rev, prograde)",
-        outfile=PNG_NAME_LONG.replace(".png","_lines.png"),
-        metric_label=r"Total $\Delta V$ (km/s)"
-    )
-    plot_porkchop_contours(
-    grid["dep_utcs"], grid["arr_utcs"],
-    grid["C3_short"], grid["TOF_days"],
-    title_suffix="short path (single-rev, prograde)",
-    outfile=PNG_NAME_SHORT.replace(".png","_C3_lines.png"),
-    metric_label=r"$C_3$ (km$^2$/s$^2$)"
+        grid["DVtot_short"], grid["C3_short"], grid["vinfA_short"], grid["TOF_days"],
+        outfile=PNG_NAME_SINGLE,
+        cmap="turbo",
+        dv_step=0.5,
+        tof_step_days=30,
     )
 
-
-    # Choose filled-contour metric
-    if FILLED_CONTOUR_METRIC.upper() == "DV":
-        metric_short = grid["DVtot_short"]
-        metric_long  = grid["DVtot_long"]
-        label = r"Total $\Delta V$ proxy  $|v_{\infty,dep}| + |v_{\infty,arr}|$  [km/s]"
-    elif FILLED_CONTOUR_METRIC.upper() == "C3":
-        metric_short = grid["C3_short"]
-        metric_long  = grid["C3_long"]
-        label = r"$C_3$  [km$^2$/s$^2$]"
-    else:
-        raise ValueError("FILLED_CONTOUR_METRIC must be 'DV' or 'C3'")
-
-    # Plot both branches
-    plot_porkchop_branch(
-        grid["dep_utcs"], grid["arr_utcs"],
-        metric_short, grid["TOF_days"],
-        vinfA=(grid["vinfA_short"] if SHOW_ARRIVAL_VINF_OVERLAY else None),
-        title_suffix="short path (single-rev, prograde)", outfile=PNG_NAME_SHORT,
-        metric_label=label
-    )
-    plot_porkchop_branch(
-        grid["dep_utcs"], grid["arr_utcs"],
-        metric_long, grid["TOF_days"],
-        vinfA=(grid["vinfA_long"] if SHOW_ARRIVAL_VINF_OVERLAY else None),
-        title_suffix="long path (single-rev, prograde)", outfile=PNG_NAME_LONG,
-        metric_label=label
-    )
-
+    # Save CSV once
     save_grid_csv(grid)
 
 

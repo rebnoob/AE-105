@@ -11,6 +11,7 @@ def _rad2deg(x, out_degrees):
     return np.degrees(x) if out_degrees else x
 
 # r,v  ->  classical elements (ELORB)
+# ----------------- rv -> classical elements -----------------
 def rv2coe(r, v, mu, deg=True, atol=1e-10):
     r = np.asarray(r, dtype=float).reshape(3)
     v = np.asarray(v, dtype=float).reshape(3)
@@ -19,7 +20,7 @@ def rv2coe(r, v, mu, deg=True, atol=1e-10):
     vnorm = np.linalg.norm(v)
     rv_dot = float(np.dot(r, v))
 
-    # h, n, e, xi
+    # angular momentum and node vector
     h = np.cross(r, v)
     hnorm = np.linalg.norm(h)
 
@@ -27,12 +28,12 @@ def rv2coe(r, v, mu, deg=True, atol=1e-10):
     n = np.cross(K, h)
     nnorm = np.linalg.norm(n)
 
+    # eccentricity vector and energy
     e_vec = ((vnorm**2 - mu/rnorm)*r - rv_dot*v) / mu
     e = np.linalg.norm(e_vec)
-
     xi = 0.5*vnorm**2 - mu/rnorm
 
-    # a, p
+    # a and p
     if abs(e - 1.0) > 1e-12:
         a = -mu/(2.0*xi)
         p = a*(1.0 - e**2)
@@ -40,65 +41,58 @@ def rv2coe(r, v, mu, deg=True, atol=1e-10):
         a = np.inf
         p = hnorm**2/mu
 
-    # i
-    cos_i = np.clip(h[2]/hnorm, -1.0, 1.0)
+    # inclination
+    cos_i = np.clip(h[2]/max(hnorm, atol), -1.0, 1.0)
     i = np.arccos(cos_i)
 
-    # RAAN (Ω)
+    # RAAN (Ω) with atan2
     if nnorm > atol:
-        cos_Om = np.clip(n[0]/nnorm, -1.0, 1.0)
-        Om = np.arccos(cos_Om)
-        if n[1] < 0:
-            Om = 2*np.pi - Om
+        Om = np.arctan2(n[1], n[0])
         Om = _wrap2pi(Om)
     else:
-        Om = 0.0
+        Om = 0.0  # undefined if equatorial
 
-    # argument of periapsis (ω)
+    # argument of periapsis (ω) with atan2
+    # cosω = (n·e)/(||n|| e), sinω = (ĥ · (n × e)) / (||n|| e)
     if nnorm > atol and e > atol:
         cos_w = np.clip(np.dot(n, e_vec)/(nnorm*e), -1.0, 1.0)
-        w = np.arccos(cos_w)
-        if e_vec[2] < 0:
-            w = 2*np.pi - w
+        sin_w = np.dot(h/hnorm, np.cross(n, e_vec)) / (nnorm*e)
+        w = np.arctan2(sin_w, cos_w)
         w = _wrap2pi(w)
     else:
-        w = 0.0
+        w = 0.0  # use special angles below
 
-    # true anomaly (ν)
+    # true anomaly (ν) with atan2
+    # cosν = (e·r)/(e r), sinν = (ĥ · (e × r)) / (e r)
     if e > atol:
         cos_nu = np.clip(np.dot(e_vec, r)/(e*rnorm), -1.0, 1.0)
-        nu = np.arccos(cos_nu)
-        if rv_dot < 0:
-            nu = 2*np.pi - nu
+        sin_nu = np.dot(h/hnorm, np.cross(e_vec, r)) / (e*rnorm)
+        nu = np.arctan2(sin_nu, cos_nu)
         nu = _wrap2pi(nu)
     else:
-        nu = 0.0
+        nu = 0.0  # use u / λ_true forms
 
-    # Special-case angles
-    w_true_tilde = None
+    # -------- special-case angles (all via atan2) --------
+    w_true_tilde = None  # equatorial elliptical: angle from +X to periapsis
     if i < atol and e > atol:
-        # elliptical equatorial
-        cos_wtt = np.clip(e_vec[0]/e, -1.0, 1.0)
-        wtt = np.arccos(cos_wtt)
-        if e_vec[1] < 0:
-            wtt = 2*np.pi - wtt
+        # atan2(e_y, e_x)
+        wtt = np.arctan2(e_vec[1], e_vec[0])
         w_true_tilde = _wrap2pi(wtt)
 
-    u = None
-    if e < atol and i >= atol:
-        if nnorm > atol:
-            cos_u = np.clip(np.dot(n, r)/(nnorm*np.linalg.norm(r)), -1.0, 1.0)
-            u_ = np.arccos(cos_u)
-            if r[2] < 0:
-                u_ = 2*np.pi - u_
-            u = _wrap2pi(u_)
+    u = None  # circular inclined: argument of latitude
+    if e < atol and i >= atol and nnorm > atol:
+        # atan2(r·(ĥ×n̂), r·n̂)
+        nhat = n/nnorm
+        hhat = h/hnorm
+        cos_u = np.clip(np.dot(nhat, r)/rnorm, -1.0, 1.0)
+        sin_u = np.dot(hhat, np.cross(nhat, r))/rnorm
+        u_ = np.arctan2(sin_u, cos_u)
+        u = _wrap2pi(u_)
 
-    lambda_true = None
+    lambda_true = None  # circular equatorial: true longitude
     if e < atol and i < atol:
-        cos_lt = np.clip(r[0]/np.linalg.norm(r), -1.0, 1.0)
-        lt = np.arccos(cos_lt)
-        if r[1] < 0:
-            lt = 2*np.pi - lt
+        # atan2(y, x)
+        lt = np.arctan2(r[1], r[0])
         lambda_true = _wrap2pi(lt)
 
     coe = {
