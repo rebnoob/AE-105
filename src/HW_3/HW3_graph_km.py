@@ -8,6 +8,15 @@ df = pd.read_csv("europa_clipper_accels.csv")
 # parse time
 df["utc"] = pd.to_datetime(df["utc"])
 
+# Convert all accelerations from m/s² to km/s² by dividing by 1000
+acceleration_columns = [
+    "a_jupiter_central", "a_jupiter_J2", "a_sun", "a_io", 
+    "a_europa", "a_ganymede", "a_callisto", "a_saturn", "a_srp", "a_thrust"
+]
+
+for col in acceleration_columns:
+    df[col] = df[col] / 1000.0
+
 plt.figure(figsize=(14, 8))
 
 # Plot acceleration sources with improved colors and styling
@@ -36,7 +45,7 @@ ax.xaxis.set_major_locator(mdates.MonthLocator())
 plt.xticks(rotation=45, ha='right')
 
 plt.xlabel("Time (UTC)", fontsize=12, fontweight='bold')
-plt.ylabel("Acceleration Magnitude (m/s²)", fontsize=12, fontweight='bold')
+plt.ylabel("Acceleration Magnitude (km/s²)", fontsize=12, fontweight='bold')
 plt.title("Europa Clipper Acceleration Sources vs Time\n(July 20 - November 15, 2032)", 
           fontsize=14, fontweight='bold', pad=20)
 plt.legend(loc="best", fontsize=10, framealpha=0.9)

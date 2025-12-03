@@ -18,7 +18,7 @@ SPK_CLIPPER = "/Users/rebnoob/Documents/ae105/generic_kernels/spk/21F31_MEGA_L24
 # ======================================================
 
 START_UTC = "2032-07-20T00:00:00"
-END_UTC   = "2033-11-15T00:00:00"
+END_UTC   = "2032-11-15T00:00:00"
 STEP_SEC  = 3600.0  # 1 hour
 
 M_SC = 4000.0      # kg
@@ -83,7 +83,7 @@ def utc_range(start_utc, end_utc, step_sec):
 
 def get_pos(target, et, observer=JUP_NAME, frame="J2000", abcorr="NONE"):
     state, _ = spice.spkezr(target, et, frame, abcorr, observer)
-    return np.array(state[:3])
+    return np.array(state[:3]) * 1000.0
 
 def grav_acc(mu, r_vec):
     r = np.linalg.norm(r_vec)
@@ -94,8 +94,18 @@ def j2_acc_jupiter(r_vec):
     if r == 0.0:
         return np.zeros(3)
     base = (MU_JUP / r**2) * 1.5 * J2_JUP * (R_JUP / r)**2
-    r_hat = r_vec / r
-    return -base * r_hat  # reduce gravity along radial
+    x, y, z = r_vec
+    # J2 vector formula:
+    # a_J2 = - (3/2) J2 (mu/r^2) (Re/r)^2  [ (1 - 5(z/r)^2) r_hat  +  2(z/r) k_hat ]
+    # Let's match the 'base' variable which is (3/2) J2 (mu/r^2) (Re/r)^2
+    
+    # term1 = (1 - 5 * (z/r)**2) * (r_vec / r)
+    # term2 = 2 * (z/r) * np.array([0, 0, 1])
+    # return -base * (term1 + term2)
+    
+    # Optimized:
+    z_sq_r_sq = (z / r)**2
+    return -base * ( (r_vec/r) * (1 - 5*z_sq_r_sq) + np.array([0,0,1]) * (2*z/r) )
 
 def srp_acc(sc_pos_sun):
     R = np.linalg.norm(sc_pos_sun)
@@ -141,8 +151,8 @@ def main():
 
             # spacecraft wrt Jupiter
             sc_state_jup, _ = spice.spkezr(SC_NAME, et, "J2000", "NONE", JUP_NAME)
-            sc_r_jup = np.array(sc_state_jup[:3])
-            sc_v_jup = np.array(sc_state_jup[3:])
+            sc_r_jup = np.array(sc_state_jup[:3]) * 1000.0
+            sc_v_jup = np.array(sc_state_jup[3:]) * 1000.0
 
             # bodies wrt Jupiter
             sun_r_jup = get_pos(SUN_NAME, et)
@@ -161,18 +171,39 @@ def main():
             sc_r_sa_rel  = sc_r_jup - sa_r_jup
 
             # accelerations
+    # accelerations
             a_jup  = grav_acc(MU_JUP, sc_r_jup)
             a_j2   = j2_acc_jupiter(sc_r_jup)
-            a_sun  = grav_acc(MU_SUN, sc_r_sun_rel)
-            a_io   = grav_acc(GMS["IO"],       sc_r_io_rel)
-            a_eur  = grav_acc(GMS["EUROPA"],   sc_r_eu_rel)
-            a_gan  = grav_acc(GMS["GANYMEDE"], sc_r_ga_rel)
-            a_cal  = grav_acc(GMS["CALLISTO"], sc_r_ca_rel)
-            a_sat  = grav_acc(GMS["SATURN"],   sc_r_sa_rel)
+            
+            # Third-body perturbations (Direct - Indirect)
+            # Indirect = acceleration of Jupiter due to Body = grav_acc(GM, body_r_jup)
+            # But grav_acc returns force on target towards attractor. 
+            # Force on Jup due to Body is towards Body. Vector is body_r_jup.
+            # a_indirect = G * M_body * (body_r_jup) / |body_r_jup|^3
+            # This is exactly grav_acc(GM, body_r_jup) because grav_acc takes r_vec as pos of object relative to center?
+            # Wait, grav_acc(mu, r_vec) returns -mu * r_vec / r^3.
+            # If r_vec is position of SC wrt Body, then it's accel of SC towards Body.
+            # Here sc_r_sun_rel is SC - Sun. So it is position of SC wrt Sun. Correct.
+            # Indirect term: Acceleration of Jupiter due to Sun.
+            # Position of Jupiter wrt Sun is (jup_r_sun) = -sun_r_jup.
+            # So a_jup_due_to_sun = -mu_sun * (-sun_r_jup) / |sun_r_jup|^3 = mu_sun * sun_r_jup / r^3.
+            # Alternatively: a_indirect = grav_acc(MU_SUN, -sun_r_jup).
+            
+            # Let's use the helper carefully.
+            # a_sc_sun = a_direct - a_indirect
+            # a_direct = grav_acc(MU_SUN, sc_r_sun_rel)  (Acc of SC due to Sun)
+            # a_indirect = grav_acc(MU_SUN, -sun_r_jup)  (Acc of Jup due to Sun)
+            
+            a_sun  = grav_acc(MU_SUN, sc_r_sun_rel) - grav_acc(MU_SUN, -sun_r_jup)
+            a_io   = grav_acc(GMS["IO"],       sc_r_io_rel) - grav_acc(GMS["IO"],       -io_r_jup)
+            a_eur  = grav_acc(GMS["EUROPA"],   sc_r_eu_rel) - grav_acc(GMS["EUROPA"],   -eu_r_jup)
+            a_gan  = grav_acc(GMS["GANYMEDE"], sc_r_ga_rel) - grav_acc(GMS["GANYMEDE"], -ga_r_jup)
+            a_cal  = grav_acc(GMS["CALLISTO"], sc_r_ca_rel) - grav_acc(GMS["CALLISTO"], -ca_r_jup)
+            a_sat  = grav_acc(GMS["SATURN"],   sc_r_sa_rel) - grav_acc(GMS["SATURN"],   -sa_r_jup)
 
             # SRP (need SC wrt Sun directly)
             sc_state_sun, _ = spice.spkezr(SC_NAME, et, "J2000", "NONE", "SUN")
-            sc_r_sun_abs = np.array(sc_state_sun[:3])
+            sc_r_sun_abs = np.array(sc_state_sun[:3]) * 1000.0
             a_srp = srp_acc(sc_r_sun_abs)
 
             # thrust
